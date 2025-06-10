@@ -145,8 +145,8 @@ def create_lead_direct(odoo_lead_data):
         return None
 
 @app.route('/', methods=['GET', 'POST'])
-def handle_webhook():
-    """Handle both GET (verification) and POST (webhook) requests at root"""
+def index():
+    """Handle requests to root path"""
     
     if request.method == 'GET':
         # Check if it's a webhook verification request
@@ -156,14 +156,14 @@ def handle_webhook():
             token = request.args.get('hub.verify_token')
             challenge = request.args.get('hub.challenge')
 
-            print("🔍 Webhook verification requested")
+            print("🔍 Webhook verification requested at root")
             print(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
 
             if token == VERIFY_TOKEN:
-                print("✅ Webhook verified")
+                print("✅ Webhook verified at root")
                 return challenge, 200
             else:
-                print("❌ Webhook verification failed")
+                print("❌ Webhook verification failed at root")
                 return 'Failed verification', 403
         else:
             # Regular GET request - return status
@@ -174,87 +174,111 @@ def handle_webhook():
                     "webhook": "/webhook",
                     "test": "/test", 
                     "test_odoo": "/test-odoo"
-                }
+                },
+                "meta_token_set": bool(META_ACCESS_TOKEN),
+                "odoo_configured": bool(ODOO_URL and ODOO_API_KEY)
             })
     
     elif request.method == 'POST':
-        # Webhook data processing
-        print("\n🔔 WEBHOOK RECEIVED!")
-        print("=" * 50)
-        print("Headers:", dict(request.headers))
-        
-        try:
-            raw_data = request.get_data()
-            print("Raw Payload:", raw_data.decode('utf-8'))
-            
-            # Signature verification (disabled for debugging)
-            signature = request.headers.get('X-Hub-Signature-256')
-            # if not verify_signature(raw_data, signature):
-            #     print("❌ Invalid signature")
-            #     return 'Invalid signature', 403
-
-            data = request.get_json()
-            print("📦 Parsed JSON:", json.dumps(data, indent=2))
-
-            for entry in data.get('entry', []):
-                for change in entry.get('changes', []):
-                    if change.get('field') == 'leadgen':
-                        leadgen_id = change['value']['leadgen_id']
-                        form_id = change['value']['form_id']
-                        page_id = change['value']['page_id']
-
-                        print(f"🔗 Processing lead: leadgen_id={leadgen_id}, form_id={form_id}")
-
-                        lead_data = fetch_lead_data(leadgen_id)
-
-                        if lead_data:
-                            print("✅ Lead data fetched successfully!")
-                            print("Lead details:", json.dumps(lead_data, indent=2))
-                            
-                            # Parse Meta lead data
-                            field_data = {item['name']: item['values'][0] for item in lead_data.get('field_data', [])}
-                            print("📊 Parsed field data:", field_data)
-                            
-                            # Map Meta fields to Odoo fields
-                            odoo_lead_data = {
-                                'name': field_data.get('full_name', field_data.get('full name', 'Meta Lead')),
-                                'email_from': field_data.get('email', ''),
-                                'phone': field_data.get('phone_number', ''),
-                                'description': f"Lead from Meta Form ID: {form_id}\nCreated: {lead_data.get('created_time', '')}\n\nAdditional Info:\n" + 
-                                              f"Business Type: {field_data.get('what_type_of_business_do_you_run?', 'N/A')}\n" +
-                                              f"Role: {field_data.get('what_is_your_role_within_the_company?', 'N/A')}\n" +
-                                              f"Demo Interest: {field_data.get('can_i_book_a_demo?', 'N/A')}",
-                            }
-                            
-                            # Remove empty fields
-                            odoo_lead_data = {k: v for k, v in odoo_lead_data.items() if v}
-                            print("🎯 Odoo lead data:", odoo_lead_data)
-                            
-                            # Create lead in Odoo
-                            result = create_lead_direct(odoo_lead_data)
-                            if result:
-                                print(f"🎉 SUCCESS! Lead created in Odoo with ID: {result}")
-                            else:
-                                print("❌ Failed to create lead in Odoo")
-                        else:
-                            print("⚠️ Failed to fetch lead data from Facebook")
-
-            print("=" * 50)
-            return 'OK', 200
-
-        except Exception as e:
-            print("❌ Exception in webhook handler:", str(e))
-            import traceback
-            traceback.print_exc()
-            return "Error", 500
+        # Handle webhook POST at root
+        return process_webhook()
 
 @app.route('/webhook', methods=['GET', 'POST'])
-def webhook_endpoint():
+def webhook():
     """Dedicated webhook endpoint"""
-    return handle_webhook()
+    
+    if request.method == 'GET':
+        # Webhook verification
+        mode = request.args.get('hub.mode')
+        token = request.args.get('hub.verify_token')
+        challenge = request.args.get('hub.challenge')
+
+        print("🔍 Webhook verification requested")
+        print(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
+
+        if mode == 'subscribe' and token == VERIFY_TOKEN:
+            print("✅ Webhook verified")
+            return challenge, 200
+        else:
+            print("❌ Webhook verification failed")
+            return 'Failed verification', 403
+    
+    elif request.method == 'POST':
+        return process_webhook()
+
+def process_webhook():
+    """Process webhook data"""
+    print("\n🔔 WEBHOOK RECEIVED!")
+    print("=" * 50)
+    print("Headers:", dict(request.headers))
+    
+    try:
+        raw_data = request.get_data()
+        print("Raw Payload:", raw_data.decode('utf-8'))
+        
+        # Signature verification (disabled for debugging)
+        signature = request.headers.get('X-Hub-Signature-256')
+        # if not verify_signature(raw_data, signature):
+        #     print("❌ Invalid signature")
+        #     return 'Invalid signature', 403
+
+        data = request.get_json()
+        print("📦 Parsed JSON:", json.dumps(data, indent=2))
+
+        for entry in data.get('entry', []):
+            for change in entry.get('changes', []):
+                if change.get('field') == 'leadgen':
+                    leadgen_id = change['value']['leadgen_id']
+                    form_id = change['value']['form_id']
+                    page_id = change['value']['page_id']
+
+                    print(f"🔗 Processing lead: leadgen_id={leadgen_id}, form_id={form_id}")
+
+                    lead_data = fetch_lead_data(leadgen_id)
+
+                    if lead_data:
+                        print("✅ Lead data fetched successfully!")
+                        print("Lead details:", json.dumps(lead_data, indent=2))
+                        
+                        # Parse Meta lead data
+                        field_data = {item['name']: item['values'][0] for item in lead_data.get('field_data', [])}
+                        print("📊 Parsed field data:", field_data)
+                        
+                        # Map Meta fields to Odoo fields
+                        odoo_lead_data = {
+                            'name': field_data.get('full_name', field_data.get('full name', 'Meta Lead')),
+                            'email_from': field_data.get('email', ''),
+                            'phone': field_data.get('phone_number', ''),
+                            'description': f"Lead from Meta Form ID: {form_id}\nCreated: {lead_data.get('created_time', '')}\n\nAdditional Info:\n" + 
+                                          f"Business Type: {field_data.get('what_type_of_business_do_you_run?', 'N/A')}\n" +
+                                          f"Role: {field_data.get('what_is_your_role_within_the_company?', 'N/A')}\n" +
+                                          f"Demo Interest: {field_data.get('can_i_book_a_demo?', 'N/A')}",
+                        }
+                        
+                        # Remove empty fields
+                        odoo_lead_data = {k: v for k, v in odoo_lead_data.items() if v}
+                        print("🎯 Odoo lead data:", odoo_lead_data)
+                        
+                        # Create lead in Odoo
+                        result = create_lead_direct(odoo_lead_data)
+                        if result:
+                            print(f"🎉 SUCCESS! Lead created in Odoo with ID: {result}")
+                        else:
+                            print("❌ Failed to create lead in Odoo")
+                    else:
+                        print("⚠️ Failed to fetch lead data from Facebook")
+
+        print("=" * 50)
+        return 'OK', 200
+
+    except Exception as e:
+        print("❌ Exception in webhook handler:", str(e))
+        import traceback
+        traceback.print_exc()
+        return "Error", 500
 
 @app.route('/test', methods=['GET'])
-def test_endpoint():
+def test():
     """Test endpoint to verify server is running"""
     return jsonify({
         "status": "OK", 
@@ -262,7 +286,16 @@ def test_endpoint():
         "odoo_url": ODOO_URL,
         "odoo_db": ODOO_DB,
         "meta_token_set": bool(META_ACCESS_TOKEN),
-        "webhook_url": request.host_url + "webhook"
+        "odoo_api_key_set": bool(ODOO_API_KEY),
+        "webhook_url": request.host_url + "webhook",
+        "environment_check": {
+            "META_ACCESS_TOKEN": "✅ Set" if META_ACCESS_TOKEN else "❌ Missing",
+            "META_APP_SECRET": "✅ Set" if META_APP_SECRET else "❌ Missing",
+            "META_APP_ID": "✅ Set" if META_APP_ID else "❌ Missing",
+            "ODOO_URL": "✅ Set" if ODOO_URL else "❌ Missing",
+            "ODOO_API_KEY": "✅ Set" if ODOO_API_KEY else "❌ Missing",
+            "VERIFY_TOKEN": "✅ Set" if VERIFY_TOKEN else "❌ Missing"
+        }
     })
 
 @app.route('/test-odoo', methods=['GET'])
@@ -284,6 +317,10 @@ def test_odoo():
     else:
         return jsonify({"status": "error", "message": "Failed to create test lead"}), 500
 
-# For local development
-if __name__ == '__main__':
-    app.run(debug=True, port=8000)
+# Vercel handler function
+def handler(request, response):
+    """Vercel serverless function handler"""
+    from werkzeug.wrappers import Request, Response
+    with app.request_context(Request(request.environ)):
+        rv = app.full_dispatch_request()
+        return Response.from_app(app, request.environ)
