@@ -1,11 +1,9 @@
-from flask import Flask, request, jsonify
-import requests
 import json
 import hmac
 import hashlib
 import os
-
-app = Flask(__name__)
+import requests
+from urllib.parse import parse_qs
 
 # Configuration - Environment variables from Vercel
 META_ACCESS_TOKEN = os.environ.get('META_ACCESS_TOKEN')
@@ -144,85 +142,14 @@ def create_lead_direct(odoo_lead_data):
         print(f"❌ Exception during Odoo operation: {str(e)}")
         return None
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    """Handle requests to root path"""
-    
-    if request.method == 'GET':
-        # Check if it's a webhook verification request
-        mode = request.args.get('hub.mode')
-        if mode == 'subscribe':
-            # Webhook verification
-            token = request.args.get('hub.verify_token')
-            challenge = request.args.get('hub.challenge')
-
-            print("🔍 Webhook verification requested at root")
-            print(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
-
-            if token == VERIFY_TOKEN:
-                print("✅ Webhook verified at root")
-                return challenge, 200
-            else:
-                print("❌ Webhook verification failed at root")
-                return 'Failed verification', 403
-        else:
-            # Regular GET request - return status
-            return jsonify({
-                "status": "OK", 
-                "message": "Meta to Odoo Webhook Server",
-                "endpoints": {
-                    "webhook": "/webhook",
-                    "test": "/test", 
-                    "test_odoo": "/test-odoo"
-                },
-                "meta_token_set": bool(META_ACCESS_TOKEN),
-                "odoo_configured": bool(ODOO_URL and ODOO_API_KEY)
-            })
-    
-    elif request.method == 'POST':
-        # Handle webhook POST at root
-        return process_webhook()
-
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    """Dedicated webhook endpoint"""
-    
-    if request.method == 'GET':
-        # Webhook verification
-        mode = request.args.get('hub.mode')
-        token = request.args.get('hub.verify_token')
-        challenge = request.args.get('hub.challenge')
-
-        print("🔍 Webhook verification requested")
-        print(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
-
-        if mode == 'subscribe' and token == VERIFY_TOKEN:
-            print("✅ Webhook verified")
-            return challenge, 200
-        else:
-            print("❌ Webhook verification failed")
-            return 'Failed verification', 403
-    
-    elif request.method == 'POST':
-        return process_webhook()
-
-def process_webhook():
+def process_webhook(body):
     """Process webhook data"""
     print("\n🔔 WEBHOOK RECEIVED!")
     print("=" * 50)
-    print("Headers:", dict(request.headers))
+    print("Raw Payload:", body)
     
     try:
-        raw_data = request.get_data()
-        print("Raw Payload:", raw_data.decode('utf-8'))
-        
-        # Signature verification (disabled for debugging)
-        signature = request.headers.get('X-Hub-Signature-256')
-        # if not verify_signature(raw_data, signature):
-        #     print("❌ Invalid signature")
-        #     return 'Invalid signature', 403
-
-        data = request.get_json()
+        data = json.loads(body)
         print("📦 Parsed JSON:", json.dumps(data, indent=2))
 
         for entry in data.get('entry', []):
@@ -269,58 +196,148 @@ def process_webhook():
                         print("⚠️ Failed to fetch lead data from Facebook")
 
         print("=" * 50)
-        return 'OK', 200
+        return {
+            'statusCode': 200,
+            'body': 'OK'
+        }
 
     except Exception as e:
         print("❌ Exception in webhook handler:", str(e))
         import traceback
         traceback.print_exc()
-        return "Error", 500
-
-@app.route('/test', methods=['GET'])
-def test():
-    """Test endpoint to verify server is running"""
-    return jsonify({
-        "status": "OK", 
-        "message": "Webhook server is running on Vercel",
-        "odoo_url": ODOO_URL,
-        "odoo_db": ODOO_DB,
-        "meta_token_set": bool(META_ACCESS_TOKEN),
-        "odoo_api_key_set": bool(ODOO_API_KEY),
-        "webhook_url": request.host_url + "webhook",
-        "environment_check": {
-            "META_ACCESS_TOKEN": "✅ Set" if META_ACCESS_TOKEN else "❌ Missing",
-            "META_APP_SECRET": "✅ Set" if META_APP_SECRET else "❌ Missing",
-            "META_APP_ID": "✅ Set" if META_APP_ID else "❌ Missing",
-            "ODOO_URL": "✅ Set" if ODOO_URL else "❌ Missing",
-            "ODOO_API_KEY": "✅ Set" if ODOO_API_KEY else "❌ Missing",
-            "VERIFY_TOKEN": "✅ Set" if VERIFY_TOKEN else "❌ Missing"
+        return {
+            'statusCode': 500,
+            'body': f'Error: {str(e)}'
         }
-    })
 
-@app.route('/test-odoo', methods=['GET'])
-def test_odoo():
-    """Test Odoo connection manually"""
-    print("🧪 Testing Odoo connection...")
-    
-    test_lead_data = {
-        'name': 'Test Lead from Vercel Webhook',
-        'email_from': 'test@example.com',
-        'phone': '+1234567890',
-        'description': 'This is a test lead created manually from Vercel'
-    }
-    
-    result = create_lead_direct(test_lead_data)
-    
-    if result:
-        return jsonify({"status": "success", "lead_id": result, "message": "Test lead created successfully"})
-    else:
-        return jsonify({"status": "error", "message": "Failed to create test lead"}), 500
-
-# Vercel handler function
-def handler(request, response):
+def handler(request, context):
     """Vercel serverless function handler"""
-    from werkzeug.wrappers import Request, Response
-    with app.request_context(Request(request.environ)):
-        rv = app.full_dispatch_request()
-        return Response.from_app(app, request.environ)
+    
+    try:
+        # Get request method
+        method = request.get('httpMethod', request.get('method', 'GET'))
+        
+        # Get query parameters
+        query_params = request.get('queryStringParameters', {}) or {}
+        
+        # Get request body
+        body = request.get('body', '')
+        if isinstance(body, bytes):
+            body = body.decode('utf-8')
+        
+        # Get headers
+        headers = request.get('headers', {})
+        
+        print(f"🔍 Method: {method}")
+        print(f"🔍 Query params: {query_params}")
+        print(f"🔍 Headers: {headers}")
+        
+        # Handle different paths and methods
+        path = request.get('path', '/')
+        
+        if method == 'GET':
+            if path == '/test':
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps({
+                        "status": "OK", 
+                        "message": "Webhook server is running on Vercel",
+                        "odoo_url": ODOO_URL,
+                        "odoo_db": ODOO_DB,
+                        "meta_token_set": bool(META_ACCESS_TOKEN),
+                        "odoo_api_key_set": bool(ODOO_API_KEY),
+                        "environment_check": {
+                            "META_ACCESS_TOKEN": "✅ Set" if META_ACCESS_TOKEN else "❌ Missing",
+                            "META_APP_SECRET": "✅ Set" if META_APP_SECRET else "❌ Missing",
+                            "META_APP_ID": "✅ Set" if META_APP_ID else "❌ Missing",
+                            "ODOO_URL": "✅ Set" if ODOO_URL else "❌ Missing",
+                            "ODOO_API_KEY": "✅ Set" if ODOO_API_KEY else "❌ Missing",
+                            "VERIFY_TOKEN": "✅ Set" if VERIFY_TOKEN else "❌ Missing"
+                        }
+                    })
+                }
+            
+            elif path == '/test-odoo':
+                print("🧪 Testing Odoo connection...")
+                
+                test_lead_data = {
+                    'name': 'Test Lead from Vercel Webhook',
+                    'email_from': 'test@example.com',
+                    'phone': '+1234567890',
+                    'description': 'This is a test lead created manually from Vercel'
+                }
+                
+                result = create_lead_direct(test_lead_data)
+                
+                if result:
+                    response_body = {"status": "success", "lead_id": result, "message": "Test lead created successfully"}
+                    status_code = 200
+                else:
+                    response_body = {"status": "error", "message": "Failed to create test lead"}
+                    status_code = 500
+                
+                return {
+                    'statusCode': status_code,
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(response_body)
+                }
+            
+            else:
+                # Handle webhook verification or default GET
+                mode = query_params.get('hub.mode')
+                if mode == 'subscribe':
+                    # Webhook verification
+                    token = query_params.get('hub.verify_token')
+                    challenge = query_params.get('hub.challenge')
+
+                    print("🔍 Webhook verification requested")
+                    print(f"Mode: {mode}, Token: {token}, Challenge: {challenge}")
+
+                    if token == VERIFY_TOKEN:
+                        print("✅ Webhook verified")
+                        return {
+                            'statusCode': 200,
+                            'body': challenge
+                        }
+                    else:
+                        print("❌ Webhook verification failed")
+                        return {
+                            'statusCode': 403,
+                            'body': 'Failed verification'
+                        }
+                else:
+                    # Default GET response
+                    return {
+                        'statusCode': 200,
+                        'headers': {'Content-Type': 'application/json'},
+                        'body': json.dumps({
+                            "status": "OK", 
+                            "message": "Meta to Odoo Webhook Server",
+                            "endpoints": {
+                                "webhook": "/webhook",
+                                "test": "/test", 
+                                "test_odoo": "/test-odoo"
+                            }
+                        })
+                    }
+        
+        elif method == 'POST':
+            # Handle webhook POST request
+            return process_webhook(body)
+        
+        else:
+            return {
+                'statusCode': 405,
+                'body': 'Method Not Allowed'
+            }
+            
+    except Exception as e:
+        print(f"❌ Handler exception: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'statusCode': 500,
+            'headers': {'Content-Type': 'application/json'},
+            'body': json.dumps({'error': str(e)})
+        }
