@@ -3,7 +3,5 @@ services:
     name: meta-odoo-webhook
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: >
-      unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY &&
-      gunicorn application:app
+    startCommand: PYTHONSTARTUP=.pythonrc.py gunicorn application:app
     plan: free
