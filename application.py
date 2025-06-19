@@ -38,7 +38,7 @@ def get_long_lived_token():
         'fb_exchange_token': META_ACCESS_TOKEN
     }
     try:
-        response = requests.get(url, params=params, timeout=8)
+        response = requests.get(url, params=params, timeout=8, proxies={})
         if response.status_code == 200:
             return response.json().get('access_token')
         else:
@@ -58,7 +58,7 @@ def fetch_lead_data(leadgen_id):
         'fields': 'id,created_time,field_data'
     }
     try:
-        response = requests.get(url, params=params, timeout=8)
+        response = requests.get(url, params=params, timeout=8, proxies={})
         if response.status_code == 200:
             return response.json()
         elif response.status_code == 401:
@@ -66,7 +66,7 @@ def fetch_lead_data(leadgen_id):
             new_token = get_long_lived_token()
             if new_token:
                 params['access_token'] = new_token
-                response = requests.get(url, params=params, timeout=8)
+                response = requests.get(url, params=params, timeout=8, proxies={})
                 if response.status_code == 200:
                     return response.json()
             print("❌ Token refresh failed")
@@ -99,7 +99,7 @@ def create_lead_direct(odoo_lead_data):
         'id': 1
     }
     try:
-        response = requests.post(create_url, json=create_data, timeout=8)
+        response = requests.post(create_url, json=create_data, timeout=8, proxies={})
         result = response.json()
         return result.get('result')
     except Exception as e:
