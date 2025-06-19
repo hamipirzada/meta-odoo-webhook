@@ -16,6 +16,12 @@ ODOO_DB = os.environ.get('ODOO_DB')
 ODOO_USERNAME = os.environ.get('ODOO_USERNAME')
 ODOO_API_KEY = os.environ.get('ODOO_API_KEY')
 VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN', '2a19a7a9136d04ba')
+# Force-disable proxy settings
+os.environ.pop('HTTP_PROXY', None)
+os.environ.pop('HTTPS_PROXY', None)
+os.environ.pop('http_proxy', None)
+os.environ.pop('https_proxy', None)
+
 
 def verify_signature(payload, signature):
     if not signature or not META_APP_SECRET:
