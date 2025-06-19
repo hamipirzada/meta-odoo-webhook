@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: meta-webhook
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn application:app
+    plan: free
