@@ -192,8 +192,3 @@ def test_odoo():
     if result:
         return jsonify({"status": "success", "lead_id": result})
     return jsonify({"status": "error", "message": "Failed to create lead"}), 500
-
-# For local testing
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))
-    app.run(host='0.0.0.0', port=port)
