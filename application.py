@@ -152,7 +152,7 @@ def handle_webhook():
                                 for item in lead_data.get('field_data', [])
                             }
                             odoo_lead_data = {
-                                'name': field_data.get('full_name', ''),
+                                'name': field_data.get('full_name', 'Meta Lead'),
                                 'email_from': field_data.get('email', ''),
                                 'phone': field_data.get('phone_number', ''),
                                 'type': 'opportunity',
